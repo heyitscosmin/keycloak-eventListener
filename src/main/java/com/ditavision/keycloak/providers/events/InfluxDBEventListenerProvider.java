@@ -12,7 +12,11 @@ import org.keycloak.events.EventType;
 import org.keycloak.events.admin.AdminEvent;
 import org.keycloak.events.admin.OperationType;
 import org.jboss.logging.Logger;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
 
+import java.util.ArrayList;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -112,7 +116,20 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
     }
     private void fromInfluxDB(Event event){
         QueryResult queryResult = influxDB.query(new Query("select \"ipAddress\", \"userId\" from \"14d\".event where \"userId\" = '" + event.getUserId() + "' limit 3",influxDBName));
-        log.info(queryResult);
+        JSONObject myJson = new JSONObject(queryResult);
+        JSONArray responseLenght = myJson.getJSONArray("results").getJSONObject(0).getJSONArray("series").getJSONObject(0).getJSONArray("values");
+        try{
+  		  ArrayList<String> IpList = new ArrayList<String>();
+
+  		  for(int i=0;i<responseLenght.length();i++){
+	  		  String json_data = myJson.getJSONArray("results").getJSONObject(0).getJSONArray("series").
+	  		  getJSONObject(0).getJSONArray("values").getJSONArray(i).getString(1);
+	  		  IpList.add(json_data);
+	  		  log.info(IpList.get(i)); log.info("\n");
+  		  	}
+  		  } catch(JSONException e){ log.info(e.toString()); }
+        
+        //log.info(queryResult);
     }
 
 }
