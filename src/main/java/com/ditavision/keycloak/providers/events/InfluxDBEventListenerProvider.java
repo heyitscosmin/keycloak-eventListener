@@ -16,6 +16,12 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.URL;
+import java.net.URLConnection;
+
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -115,7 +121,7 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
         influxDB.write(influxDBName, influxDBRetention, pb.build());
     }
     private void fromInfluxDB(Event event){
-        QueryResult queryResult = influxDB.query(new Query("select \"ipAddress\", \"userId\" from \"14d\".event where \"userId\" = '" + event.getUserId() + "' limit 3",influxDBName));
+        QueryResult queryResult = influxDB.query(new Query("select \"ipAddress\", \"userId\" from \"14d\".event where \"userId\" = '" + event.getUserId() + "'ORDER BY \"time\" DESC limit 3",influxDBName));
         JSONObject myJson = new JSONObject(queryResult);
         JSONArray responseLenght = myJson.getJSONArray("results").getJSONObject(0).getJSONArray("series").getJSONObject(0).getJSONArray("values");
         try{
@@ -126,10 +132,32 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
 	  		  getJSONObject(0).getJSONArray("values").getJSONArray(i).getString(1);
 	  		  IpList.add(json_data);
 	  		  log.info(IpList.get(i)); log.info("\n");
+	  		  ipToLocation(IpList.get(i));
   		  	}
-  		  } catch(JSONException e){ log.info(e.toString()); }
+  		  } catch(JSONException | IOException e){ log.info(e.toString()); }
         
         //log.info(queryResult);
+    }
+
+    private void ipToLocation(String ip) throws IOException{
+        try {
+            URL ipapi = new URL("https://ipapi.co/" + ip + "/city");
+
+            URLConnection c = ipapi.openConnection();
+            c.setRequestProperty("User-Agent", "java-ipapi-client");
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(c.getInputStream())
+            );
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+                //System.out.println(line);
+                log.info(line);
+            }
+            reader.close();
+        } catch(IOException e){
+            log.info("The provided IP is local." + e.toString());
+        }
     }
 
 }
