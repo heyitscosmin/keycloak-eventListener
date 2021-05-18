@@ -71,6 +71,7 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
     }
 
     private void toInfluxDB(Event event) {
+    	if(event.getType().toString()=="LOGIN") {
         Point.Builder pb = Point.measurement("event").
                 tag("type", event.getType().toString()).
                 tag("realmId", event.getRealmId()).
@@ -101,6 +102,9 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
         }
 
         influxDB.write(influxDBName, influxDBRetention, pb.build());
+    	}else {
+    		log.info("event.getType is NOT login");
+    	}
     }
 
     private void toInfluxDB(AdminEvent event) {
