@@ -50,8 +50,12 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
         // Ignore excluded events
         if (excludedEvents != null && excludedEvents.contains(event.getType())) {
             return;
-        } else {
-            toInfluxDB(event);
+        } else if(event.getType().toString()=="LOGIN"){ // log only LOGIN data and ignore else
+            try {
+				toInfluxDB(event);
+			} catch (IOException e) {
+				e.printStackTrace();
+			}
             fromInfluxDB(event);
         }
     }
@@ -69,15 +73,14 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
     @Override
     public void close() {
     }
-
-    private void toInfluxDB(Event event) {
-    	if(event.getType().toString()=="LOGIN") {
+    private void toInfluxDB(Event event) throws IOException {
         Point.Builder pb = Point.measurement("event").
                 tag("type", event.getType().toString()).
                 tag("realmId", event.getRealmId()).
                 tag("clientId", event.getClientId() != null ? event.getClientId() : "unknown").
                 addField("userId", event.getUserId() != null ? event.getUserId() : "unknown").
                 addField("ipAddress", event.getIpAddress() != null ? event.getIpAddress() : "unknown").
+                addField("location", ipToLocation(event.getIpAddress().toString()) != null ? event.getIpAddress() : "unknown/localhost").
                 time(event.getTime(), TimeUnit.MILLISECONDS);
         if (event.getError() != null) {
             pb.addField("error", event.getError());
@@ -100,13 +103,8 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
                 e.printStackTrace();
             }
         }
-
         influxDB.write(influxDBName, influxDBRetention, pb.build());
-    	}else {
-    		log.info("event.getType is NOT login");
-    	}
     }
-
     private void toInfluxDB(AdminEvent event) {
         Point.Builder pb = Point.measurement("adminEvent").
                 tag("operationType", event.getOperationType().toString()).
@@ -124,44 +122,49 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
 
         influxDB.write(influxDBName, influxDBRetention, pb.build());
     }
+    
     private void fromInfluxDB(Event event){
-        QueryResult queryResult = influxDB.query(new Query("select \"ipAddress\", \"userId\" from \"14d\".event where \"userId\" = '" + event.getUserId() + "'ORDER BY \"time\" DESC limit 3",influxDBName));
+    	ArrayList<String> locationList = new ArrayList<String>();
+        QueryResult queryResult = influxDB.query(new Query("select \"ipAddress\", \"userId\", \"location\" from \"14d\".event where \"userId\" = '" + event.getUserId() + "'ORDER BY \"time\" DESC limit 3",influxDBName));
         JSONObject myJson = new JSONObject(queryResult);
         JSONArray responseLenght = myJson.getJSONArray("results").getJSONObject(0).getJSONArray("series").getJSONObject(0).getJSONArray("values");
         try{
-  		  ArrayList<String> IpList = new ArrayList<String>();
+  		  
 
   		  for(int i=0;i<responseLenght.length();i++){
-	  		  String json_data = myJson.getJSONArray("results").getJSONObject(0).getJSONArray("series").
-	  		  getJSONObject(0).getJSONArray("values").getJSONArray(i).getString(1);
-	  		  IpList.add(json_data);
-	  		  log.info(IpList.get(i)); log.info("\n");
-	  		  ipToLocation(IpList.get(i));
+  			  String json_data = myJson.getJSONArray("results").
+	  				  getJSONObject(0).
+	  				  getJSONArray("series").
+	  				  getJSONObject(0).
+			  		  getJSONArray("values").
+			  		  getJSONArray(i).
+			  		  getString(3);
+	  		  
+	  		  locationList.add(json_data);
+	  		  log.info(locationList.get(i));log.info("\n");
   		  	}
-  		  } catch(JSONException | IOException e){ log.info(e.toString()); }
-        
-        //log.info(queryResult);
+  		  } catch(JSONException e){ log.info("error in fromInfluxDB"+e.toString()); }
+        if(locationList.get(0) != locationList.get(1) || locationList.get(0) != locationList.get(2)) {}
     }
 
-    private void ipToLocation(String ip) throws IOException{
+    private String ipToLocation(String ip) throws IOException{
+    	
         try {
             URL ipapi = new URL("https://ipapi.co/" + ip + "/city");
 
             URLConnection c = ipapi.openConnection();
-            c.setRequestProperty("User-Agent", "java-ipapi-client");
+            c.setRequestProperty("Content-Type", "java-ipapi-client");
             BufferedReader reader = new BufferedReader(
                     new InputStreamReader(c.getInputStream())
             );
-
             String line;
             while ((line = reader.readLine()) != null) {
-                //System.out.println(line);
                 log.info(line);
             }
             reader.close();
         } catch(IOException e){
-            log.info("The provided IP is local." + e.toString());
+            log.info("The provided IP is local or API error" + e.toString());
         }
-    }
-
+		return null;
+   }
 }
