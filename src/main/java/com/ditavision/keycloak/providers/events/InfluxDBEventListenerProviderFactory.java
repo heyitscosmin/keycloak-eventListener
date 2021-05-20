@@ -30,7 +30,7 @@ public class InfluxDBEventListenerProviderFactory implements EventListenerProvid
 
     @Override
     public EventListenerProvider create(KeycloakSession session) {
-        return new InfluxDBEventListenerProvider(excludedEvents, excludedAdminOperations, influxDB, influxdbDBName, influxdbRetentionPolicy);
+        return new InfluxDBEventListenerProvider(excludedEvents, excludedAdminOperations, influxDB, influxdbDBName, influxdbRetentionPolicy, session);
     }
 
     @SuppressWarnings("deprecation")

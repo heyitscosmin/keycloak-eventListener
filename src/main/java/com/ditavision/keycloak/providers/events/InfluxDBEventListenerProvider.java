@@ -6,11 +6,17 @@ import org.influxdb.InfluxDB;
 import org.influxdb.dto.Point;
 import org.influxdb.dto.Query;
 import org.influxdb.dto.QueryResult;
+import org.keycloak.email.DefaultEmailSenderProvider;
+import org.keycloak.email.EmailException;
 import org.keycloak.events.Event;
 import org.keycloak.events.EventListenerProvider;
 import org.keycloak.events.EventType;
 import org.keycloak.events.admin.AdminEvent;
 import org.keycloak.events.admin.OperationType;
+import org.keycloak.models.KeycloakSession;
+import org.keycloak.models.RealmModel;
+import org.keycloak.models.RealmProvider;
+import org.keycloak.models.UserModel;
 import org.jboss.logging.Logger;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -35,15 +41,25 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
     private final InfluxDB influxDB;
     private final String influxDBName;
     private final String influxDBRetention;
+    
+    private KeycloakSession session = null;
+    private final RealmProvider model;
+    
+    
 
 
-    public InfluxDBEventListenerProvider(Set<EventType> excludedEvents, Set<OperationType> excludedAdminOpearations, InfluxDB influxDB, String influxDBName, String influxDBRetention) {
+    public InfluxDBEventListenerProvider(Set<EventType> excludedEvents, Set<OperationType> excludedAdminOpearations, InfluxDB influxDB, String influxDBName, String influxDBRetention, KeycloakSession session) {
         this.excludedEvents = excludedEvents;
         this.excludedAdminOperations = excludedAdminOpearations;
         this.influxDB = influxDB;
         this.influxDBName = influxDBName;
         this.influxDBRetention = influxDBRetention;
+        
+        this.session = session;
+    	this.model = session.realms();
     }
+    
+    
 
     @Override
     public void onEvent(Event event) {
@@ -56,6 +72,7 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
+            sendEmail(event);
             fromInfluxDB(event);
         }
     }
@@ -167,4 +184,24 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
         }
 		return null;
    }
+    
+    private void sendEmail(Event event) { //implemented from https://keycloak.discourse.group/t/send-email-on-event/3062/8
+    	RealmModel realm = this.model.getRealm(event.getRealmId());
+    	UserModel user = this.session.users().getUserById(event.getUserId(), realm);
+    	if (user != null && user.getEmail() != null) {
+    		System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>>>" + user.getEmail());
+
+    		DefaultEmailSenderProvider senderProvider = new DefaultEmailSenderProvider(session);
+    		try {
+    			senderProvider.send(session.getContext().getRealm().getSmtpConfig(), user, 
+    					"test", 
+    					"body test",
+    					"html test");
+    		} catch (EmailException e) {
+    			// TODO Auto-generated catch block
+    			e.printStackTrace();	
+    		}
+    	}
+    	
+    }
 }
