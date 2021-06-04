@@ -42,6 +42,8 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
     private final String influxDBName;
     private final String influxDBRetention;
     
+    private final ArrayList<String> locationList = new ArrayList<String>();
+    
     private KeycloakSession session = null;
     private final RealmProvider model;
     
@@ -72,8 +74,7 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-            sendEmail(event);
-            fromInfluxDB(event);
+            checkUserLocation(event);
         }
     }
 
@@ -140,8 +141,8 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
         influxDB.write(influxDBName, influxDBRetention, pb.build());
     }
     
-    private void fromInfluxDB(Event event){
-    	ArrayList<String> locationList = new ArrayList<String>();
+    private void checkUserLocation(Event event){
+    	
         QueryResult queryResult = influxDB.query(new Query("select \"ipAddress\", \"userId\", \"location\" from \"14d\".event where \"userId\" = '" + event.getUserId() + "'ORDER BY \"time\" DESC limit 3",influxDBName));
         JSONObject myJson = new JSONObject(queryResult);
         JSONArray responseLenght = myJson.getJSONArray("results").getJSONObject(0).getJSONArray("series").getJSONObject(0).getJSONArray("values");
@@ -161,7 +162,10 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
 	  		  log.info(locationList.get(i));log.info("\n");
   		  	}
   		  } catch(JSONException e){ log.info("error in fromInfluxDB"+e.toString()); }
-        if(locationList.get(0) != locationList.get(1) || locationList.get(0) != locationList.get(2)) {}
+        
+        if(locationList.get(0).toString().equalsIgnoreCase(locationList.get(1).toString()) == false) { //condition to send email when 1st location =/= 2nd location
+        	sendEmail(event);
+        }
     }
 
     private String ipToLocation(String ip) throws IOException{
@@ -188,15 +192,30 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
     private void sendEmail(Event event) { //implemented from https://keycloak.discourse.group/t/send-email-on-event/3062/8
     	RealmModel realm = this.model.getRealm(event.getRealmId());
     	UserModel user = this.session.users().getUserById(event.getUserId(), realm);
+    	
+    	String emailPlainContent = "Unrecognized IP location\n\n" +
+                "Email: " + user.getEmail() + "\n" +
+                "Username: " + user.getUsername() + "\n" +
+                "Client: " + event.getClientId();
+
+        String emailHtmlContent = "<h1>Hello, " + user.getUsername() + "</h1>"  +
+                "<br>" +
+                "<p>This is an automated message to notify you that we detected a login attemp with a valid password to your account from an unrecognized location.</p>" +
+                "<br>" +
+                "<p>Location of login: " + locationList.get(0).toString() + "</p>" +
+                "<p>IP Address logged in: " + event.getIpAddress() + "</p>" +
+
+                "<br>";
+    	
     	if (user != null && user.getEmail() != null) {
     		System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>>>" + user.getEmail());
 
     		DefaultEmailSenderProvider senderProvider = new DefaultEmailSenderProvider(session);
     		try {
     			senderProvider.send(session.getContext().getRealm().getSmtpConfig(), user, 
-    					"test", 
-    					"body test",
-    					"html test");
+    					"Suspicious sign in detected", 
+    					emailPlainContent,
+    					emailHtmlContent);
     		} catch (EmailException e) {
     			// TODO Auto-generated catch block
     			e.printStackTrace();	
