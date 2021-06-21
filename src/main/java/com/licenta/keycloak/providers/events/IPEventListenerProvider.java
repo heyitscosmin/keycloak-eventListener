@@ -1,4 +1,4 @@
-package com.ditavision.keycloak.providers.events;
+package com.licenta.keycloak.providers.events;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -32,45 +32,35 @@ import java.util.ArrayList;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-public class InfluxDBEventListenerProvider implements EventListenerProvider {
-	
-	private static final Logger log = Logger.getLogger(InfluxDBEventListenerProvider.class);
+public class IPEventListenerProvider implements EventListenerProvider {
 
-    private final Set<EventType> excludedEvents;
-    private final Set<OperationType> excludedAdminOperations;
     private final InfluxDB influxDB;
-    private final String influxDBName;
-    private final String influxDBRetention;
-    
-    private final ArrayList<String> locationList = new ArrayList<String>();
-    
     private KeycloakSession session = null;
     private final RealmProvider model;
-    
-    
+    private final String nameInfluxDB;
+    private final String retentionPolicyInfluxDB;
+    private final Set<EventType> excludeEventsList;
+    private final Set<OperationType> excludeAdminOpList;
+    private final ArrayList<String> locationList = new ArrayList<String>();
+    private static final Logger log = Logger.getLogger(IPEventListenerProvider.class);
 
-
-    public InfluxDBEventListenerProvider(Set<EventType> excludedEvents, Set<OperationType> excludedAdminOpearations, InfluxDB influxDB, String influxDBName, String influxDBRetention, KeycloakSession session) {
-        this.excludedEvents = excludedEvents;
-        this.excludedAdminOperations = excludedAdminOpearations;
+    public IPEventListenerProvider(Set<EventType> excludeEventsList, Set<OperationType> excludeAdminOpList, InfluxDB influxDB, String nameInfluxDB, String retentionPolicyInfluxDB, KeycloakSession session) {
         this.influxDB = influxDB;
-        this.influxDBName = influxDBName;
-        this.influxDBRetention = influxDBRetention;
-        
         this.session = session;
-    	this.model = session.realms();
+        this.model = session.realms();
+        this.nameInfluxDB = nameInfluxDB;
+        this.retentionPolicyInfluxDB = retentionPolicyInfluxDB;
+        this.excludeEventsList = excludeEventsList;
+        this.excludeAdminOpList = excludeAdminOpList;
     }
-    
-    
 
     @Override
     public void onEvent(Event event) {
-        // Ignore excluded events
-        if (excludedEvents != null && excludedEvents.contains(event.getType())) {
+        if (excludeEventsList != null && excludeEventsList.contains(event.getType())) {
             return;
-        } else if(event.getType().toString()=="LOGIN"){ // log only LOGIN data and ignore else
+        } else if(event.getType().toString()=="LOGIN"){
             try {
-				toInfluxDB(event);
+				insertDataIntoInfluxDB(event);
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -80,18 +70,18 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
 
     @Override
     public void onEvent(AdminEvent event, boolean includeRepresentation) {
-        // Ignore excluded operations
-        if (excludedAdminOperations != null && excludedAdminOperations.contains(event.getOperationType())) {
+        if (excludeAdminOpList != null && excludeAdminOpList.contains(event.getOperationType())) {
             return;
         } else {
-            toInfluxDB(event);
+            insertDataIntoInfluxDB(event);
         }
     }
 
     @Override
     public void close() {
     }
-    private void toInfluxDB(Event event) throws IOException {
+
+    private void insertDataIntoInfluxDB(Event event) throws IOException {
         Point.Builder pb = Point.measurement("event").
                 tag("type", event.getType().toString()).
                 tag("realmId", event.getRealmId()).
@@ -110,7 +100,6 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
                 pb.addField("username", username);
             }
 
-            //store details as json as probably not needed as separate fields
             try {
                 ObjectMapper objectMapper = new ObjectMapper();
                 String json = objectMapper.writeValueAsString(event.getDetails());
@@ -121,9 +110,10 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
                 e.printStackTrace();
             }
         }
-        influxDB.write(influxDBName, influxDBRetention, pb.build());
+        influxDB.write(nameInfluxDB, retentionPolicyInfluxDB, pb.build());
     }
-    private void toInfluxDB(AdminEvent event) {
+
+    private void insertDataIntoInfluxDB(AdminEvent event) {
         Point.Builder pb = Point.measurement("adminEvent").
                 tag("operationType", event.getOperationType().toString()).
                 tag("resourceType", event.getResourceType() != null ? event.getResourceType().toString() : "unknown").
@@ -137,19 +127,15 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
         if (event.getError() != null) {
             pb.addField("error", event.getError());
         }
-
-        influxDB.write(influxDBName, influxDBRetention, pb.build());
+        influxDB.write(nameInfluxDB, retentionPolicyInfluxDB, pb.build());
     }
     
     private void checkUserLocation(Event event){
-    	
-        QueryResult queryResult = influxDB.query(new Query("select \"ipAddress\", \"userId\", \"location\" from \"14d\".event where \"userId\" = '" + event.getUserId() + "'ORDER BY \"time\" DESC limit 3",influxDBName));
+        QueryResult queryResult = influxDB.query(new Query("select \"ipAddress\", \"userId\", \"location\" from \"14d\".event where \"userId\" = '" + event.getUserId() + "'ORDER BY \"time\" DESC limit 3", nameInfluxDB));
         JSONObject myJson = new JSONObject(queryResult);
         JSONArray responseLenght = myJson.getJSONArray("results").getJSONObject(0).getJSONArray("series").getJSONObject(0).getJSONArray("values");
         try{
-  		  
-
-  		  for(int i=0;i<responseLenght.length();i++){
+  		  for(int i = 0; i < responseLenght.length(); i++){
   			  String json_data = myJson.getJSONArray("results").
 	  				  getJSONObject(0).
 	  				  getJSONArray("series").
@@ -157,13 +143,14 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
 			  		  getJSONArray("values").
 			  		  getJSONArray(i).
 			  		  getString(3);
-	  		  
 	  		  locationList.add(json_data);
 	  		  log.info(locationList.get(i));log.info("\n");
   		  	}
   		  } catch(JSONException e){ log.info("error in fromInfluxDB"+e.toString()); }
-        
-        if(locationList.get(0).toString().equalsIgnoreCase(locationList.get(1).toString()) == false) { //condition to send email when 1st location =/= 2nd location
+        if(responseLenght.length() == 1){
+            log.info("only one authentication");
+        }
+        else if(locationList.get(0).toString().equalsIgnoreCase(locationList.get(1).toString()) == false) { //condition to send email when 1st location =/= 2nd location
         	sendEmail(event);
         }
     }
@@ -172,7 +159,6 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
     	
         try {
             URL ipapi = new URL("https://ipapi.co/" + ip + "/city");
-
             URLConnection c = ipapi.openConnection();
             c.setRequestProperty("Content-Type", "java-ipapi-client");
             BufferedReader reader = new BufferedReader(
@@ -189,38 +175,34 @@ public class InfluxDBEventListenerProvider implements EventListenerProvider {
 		return null;
    }
     
-    private void sendEmail(Event event) { //implemented from https://keycloak.discourse.group/t/send-email-on-event/3062/8
-    	RealmModel realm = this.model.getRealm(event.getRealmId());
-    	UserModel user = this.session.users().getUserById(event.getUserId(), realm);
-    	
-    	String emailPlainContent = "Unrecognized IP location\n\n" +
-                "Email: " + user.getEmail() + "\n" +
-                "Username: " + user.getUsername() + "\n" +
+    private void sendEmail(Event event) {
+        RealmModel realmModel = this.model.getRealm(event.getRealmId());
+        UserModel userModel = this.session.users().getUserById(event.getUserId(), realmModel);
+
+    	String contentForEmail = "Unrecognized IP location\n\n" +
+                "Email: " + userModel.getEmail() + "\n" +
+                "Username: " + userModel.getUsername() + "\n" +
                 "Client: " + event.getClientId();
 
-        String emailHtmlContent = "<h1>Hello, " + user.getUsername() + "</h1>"  +
+        String htmlContentForEmail = "<h1>Hello, " + userModel.getUsername() + "</h1>"  +
                 "<br>" +
-                "<p>This is an automated message to notify you that we detected a login attemp with a valid password to your account from an unrecognized location.</p>" +
+                "<p>This is an automated message to notify you that we detected a login attempt with a valid password to your account from an unrecognized location.</p>" +
                 "<br>" +
                 "<p>Location of login: " + locationList.get(0).toString() + "</p>" +
                 "<p>IP Address logged in: " + event.getIpAddress() + "</p>" +
 
                 "<br>";
     	
-    	if (user != null && user.getEmail() != null) {
-    		System.out.println(">>>>>>>>>>>>>>>>>>>>>>>>>>>" + user.getEmail());
-
-    		DefaultEmailSenderProvider senderProvider = new DefaultEmailSenderProvider(session);
+    	if (userModel != null && userModel.getEmail() != null) {
+    		DefaultEmailSenderProvider defaultEmailSenderProvider = new DefaultEmailSenderProvider(session);
     		try {
-    			senderProvider.send(session.getContext().getRealm().getSmtpConfig(), user, 
+    			defaultEmailSenderProvider.send(session.getContext().getRealm().getSmtpConfig(), userModel,
     					"Suspicious sign in detected", 
-    					emailPlainContent,
-    					emailHtmlContent);
+    					contentForEmail,
+    					htmlContentForEmail);
     		} catch (EmailException e) {
-    			// TODO Auto-generated catch block
     			e.printStackTrace();	
     		}
     	}
-    	
     }
 }
